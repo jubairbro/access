@@ -34,7 +34,7 @@ This is not a script repository. This is a **control/approval system** that work
 ---
 
 ## 📞 Contact
-For access or support, please contact via: (🧊 Telegram 🧊)[https://t.me/Jubairbro_bot)
+For access or support, please contact via: [🧊 Telegram 🧊](https://t.me/Jubairbro_bot)
 
 -
 
