@@ -43,3 +43,4 @@
 ##/start /start
 ##KEY-SENSEI-0C31638B Moni
 ##KEY-SENSEI-0C31638B moni
+##0C31638B moni
