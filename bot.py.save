@@ -1,0 +1,437 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import telebot
+from telebot import types
+import os
+import time
+import datetime
+import threading
+import re
+import random
+import subprocess
+import shutil
+import psutil
+import requests
+import sys
+import platform
+import distro
+
+# --- CONFIGURATION ---
+BOT_TOKEN = "8102622534:AAFhXgaZOk4UItHa1PQgsGfkHsK8LSj-HV0"
+ADMIN_USER_ID = 8486562838
+ADMIN_USERNAME = "JubairZ"
+
+CHANNEL_IDS = [-1001554012044, -1002378656827, -1001773601997]
+REPO_PATH = "/root/data/access"
+USERS_FILE = "users.txt"
+ALL_USERS_FILE = "all_users.txt"
+
+BOT_START_TIME = time.time()
+
+# Sticker List
+raw_stickers = [
+    "CAACAgUAAxkBAAEQFh1pTRsAAf5R_J3O652wxdmwM-ds-6sAAq0dAAKfX2lWTZK9M7qWVsw2BA",
+    "CAACAgUAAxkBAAEQFh9pTRsWutyYZ0zFjB_i8PqAzdgnIgACyw0AAuiD0FU06OGfD316mTYE",
+    "CAACAgUAAxkBAAEQFiFpTRs1IxCdBo76ZrY3-G9VNXTWHAACiREAAm_jIVQPovOPmmpnWDYE",
+    "CAACAgUAAxkBAAEQFiNpTRtZewQ7Aqak5RlpHtK7zNHW8AACRRsAAttxcFVn9BSKbnj5pDYE",
+    "CAACAgUAAxkBAAEQGG5pTkkanTVCRspKz7QSiGjKRH_POwACyxQAAnCY4FfXWQ4qPSvqIzYE",
+    "CAACAgUAAxkBAAEQGHBpTkk373ONRZlwmyof-xTJ2W6LJQACpxsAAlHdoFQmyB_wzHLCvDYE",
+    "CAACAgUAAxkBAAEQGHJpTkk-kPydKn74I0TPasp2Ra2rbwAC7hwAAocSKFXHwjYtURdRcTYE",
+    "CAACAgUAAxkBAAEQGHRpTklDXkJyvHiD4lKT-X4Unn6uswACxBUAAjZJiVdwaV0lFUhI0DYE"
+]
+STICKER_IDS = list(set(raw_stickers))
+
+bot = telebot.TeleBot(BOT_TOKEN, parse_mode="Markdown")
+broadcast_data = {}
+
+# --- UTILS ---
+def to_small_caps(text):
+    chars = "abcdefghijklmnopqrstuvwxyz"
+    caps = "ᴀʙᴄᴅᴇꜰɢʜɪᴊᴋʟᴍɴᴏᴘQʀꜱᴛᴜᴠᴡxʏᴢ"
+    trans = str.maketrans(chars, caps)
+    return text.lower().translate(trans)
+
+def make_bar(percent, length=10):
+    filled = int(length * percent // 100)
+    return '▣' * filled + '▢' * (length - filled)
+
+def get_readable_time(seconds):
+    m, s = divmod(seconds, 60)
+    h, m = divmod(m, 60)
+    d, h = divmod(h, 24)
+    if d > 0: return f"{int(d)}ᴅ {int(h)}ʜ {int(m)}ᴍ"
+    return f"{int(h)}ʜ {int(m)}ᴍ {int(s)}ꜱ"
+
+def get_readable_size(size_in_bytes):
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if size_in_bytes < 1024: return f"{size_in_bytes:.2f} {unit}"
+        size_in_bytes /= 1024
+    return f"{size_in_bytes:.2f} PB"
+
+# --- SYSTEM MONITOR ---
+def get_system_status():
+    cpu_p = psutil.cpu_percent(interval=0.5)
+    cpu_cores = psutil.cpu_count(logical=True)
+    mem = psutil.virtual_memory()
+    disk = psutil.disk_usage('/')
+    os_name = distro.name(pretty=True)
+    
+    try:
+        net = requests.get("http://ip-api.com/json", timeout=3).json()
+        ip = net.get("query", "Hidden")
+        loc = net.get("country", "Unknown")
+    except: ip, loc = "Error", "Error"
+
+    sys_up = get_readable_time(time.time() - psutil.boot_time())
+    bot_up = get_readable_time(time.time() - BOT_START_TIME)
+
+    return f"""
+╭─{to_small_caps('performance')}
+│ 𝗖𝗣𝗨: {make_bar(cpu_p)} {cpu_p}%
+│        ({cpu_cores} ᴄᴏʀᴇꜱ)
+│ 𝗥𝗔𝗠: {make_bar(mem.percent)} {mem.percent}%
+│        ({get_readable_size(mem.used)} / {get_readable_size(mem.total)})
+│ 𝗗𝗶𝘀𝗸: {make_bar(disk.percent)} {disk.percent}%
+│        ({get_readable_size(disk.used)} / {get_readable_size(disk.total)})
+╰─────────────────────╯
+╭─{to_small_caps('system info')}
+│ 𝗢𝗦: {os_name}
+│ 𝗨𝗽𝘁𝗶𝗺𝗲: {sys_up}
+│ 𝗕𝗼𝘁: {bot_up}
+╰─────────────────────╯
+╭─{to_small_caps('network')}
+│ 𝗜𝗣: `{ip}`
+│ 𝗟𝗼𝗰: {loc}
+╰─────────────────────╯"""
+
+# --- DATABASE ---
+def save_user(chat_id):
+    if not os.path.exists(ALL_USERS_FILE): open(ALL_USERS_FILE, "w").close()
+    with open(ALL_USERS_FILE, "r") as f: users = f.read().splitlines()
+    if str(chat_id) not in users:
+        with open(ALL_USERS_FILE, "a") as f: f.write(f"{chat_id}\n")
+
+# --- ANIMATIONS ---
+def smart_loader(chat_id, text_title):
+    base_msg = bot.send_message(chat_id, "⏳")
+    steps = ["▪️▫️▫️▫️▫️", "▪️▪️▫️▫️▫️", "▪️▪️▪️▫️▫️", "▪️▪️▪️▪️▫️", "▪️▪️▪️▪️▪️"]
+    for i in range(5):
+        msg_text = f"""
+╭─{to_small_caps(text_title)}
+│ 𝗟𝗼𝗮𝗱𝗶𝗻𝗴: {steps[i]} {(i+1)*20}%
+│ 𝗦𝘁𝗮𝘁𝘂𝘀: {to_small_caps('processing request...')}
+╰─────────────────────╯"""
+        try: bot.edit_message_text(msg_text, chat_id, base_msg.message_id)
+        except: pass
+        time.sleep(0.3)
+    try: bot.delete_message(chat_id, base_msg.message_id)
+    except: pass
+
+def startup_sequence(chat_id):
+    try:
+        s_msg = bot.send_sticker(chat_id, random.choice(STICKER_IDS))
+        time.sleep(2)
+        bot.delete_message(chat_id, s_msg.message_id)
+    except: pass
+    smart_loader(chat_id, "initializing")
+
+# --- GIT HANDLER ---
+def git_push_changes(commit_msg):
+    try:
+        os.chdir(REPO_PATH)
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", REPO_PATH], check=False)
+        subprocess.run(["git", "pull"], capture_output=True)
+        subprocess.run(["git", "add", "."], check=True)
+        subprocess.run(["git", "commit", "-m", commit_msg], capture_output=True)
+        res = subprocess.run(["git", "push"], capture_output=True, text=True)
+        return res.returncode == 0
+    except: return False
+
+# --- HANDLERS ---
+@bot.message_handler(commands=['start'])
+def start_handler(message):
+    uid = message.from_user.id
+    cid = message.chat.id
+    try: bot.delete_message(cid, message.message_id)
+    except: pass
+    save_user(uid)
+    check_join_status(cid, uid, message.from_user.first_name)
+
+def check_join_status(cid, uid, name):
+    missing = []
+    for chid in CHANNEL_IDS:
+        try:
+            stat = bot.get_chat_member(chid, uid).status
+            if stat not in ['member', 'administrator', 'creator']:
+                link = bot.export_chat_invite_link(chid)
+                title = bot.get_chat(chid).title
+                missing.append((title, link))
+        except: pass
+    
+    if missing:
+        text = f"""
+╭─{to_small_caps('access denied')}
+│ ʜᴇʟʟᴏ {name},
+│ ʏᴏᴜ ᴍᴜꜱᴛ ᴊᴏɪɴ ᴏᴜʀ ᴄʜᴀɴɴᴇʟꜱ
+│ ᴛᴏ ᴜꜱᴇ ᴛʜɪꜱ ʙᴏᴛ.
+╰─────────────────────╯"""
+        mk = types.InlineKeyboardMarkup(row_width=1)
+        for title, link in missing:
+            mk.add(types.InlineKeyboardButton(f"➕ ᴊᴏɪɴ {title}", url=link))
+        mk.add(types.InlineKeyboardButton("✅ ᴠᴇʀɪꜰʏ ᴊᴏɪɴᴇᴅ", callback_data="chk_join"))
+        bot.send_message(cid, text, reply_markup=mk)
+    else:
+        startup_sequence(cid)
+        show_user_menu(cid, uid)
+
+def show_user_menu(cid, uid):
+    text = f"""
+╭─{to_small_caps('user profile')}
+│ 🆔 𝗜𝗗: `{cid}`
+│ 🛡 𝗥𝗼𝗹𝗲: {to_small_caps('user')}
+│ 🤖 𝗕𝗼𝘁: {to_small_caps('online')}
+╰─────────────────────╯
+╭─{to_small_caps('services')}
+│ ᴄʜᴏᴏꜱᴇ ᴀ ꜱᴇʀᴠɪᴄᴇ ʙᴇʟᴏᴡ
+╰─────────────────────╯"""
+    mk = types.InlineKeyboardMarkup(row_width=2)
+    mk.add(types.InlineKeyboardButton("🚀 ꜱᴇɴꜱᴇɪ", callback_data="srv_sensei"),
+           types.InlineKeyboardButton("🛠 ᴄʀᴀᴄᴋ", callback_data="srv_crack"))
+    mk.add(types.InlineKeyboardButton("👨‍💻 ᴅᴇᴠᴇʟᴏᴘᴇʀ", url=f"https://t.me/{ADMIN_USERNAME}"))
+    if uid == ADMIN_USER_ID:
+        mk.add(types.InlineKeyboardButton("👑 ᴀᴅᴍɪɴ ᴘᴀɴᴇʟ", callback_data="open_admin"))
+    bot.send_message(cid, text, reply_markup=mk)
+
+def show_admin_panel(cid):
+    text = f"""
+╭─{to_small_caps('admin control')}
+│ 👑 𝗪𝗲𝗹𝗰𝗼𝗺𝗲 𝗖𝗼𝗺𝗺𝗮𝗻𝗱𝗲𝗿
+│ 🎮 𝗖𝗼𝗻𝘁𝗿𝗼𝗹 𝗬𝗼𝘂𝗿 𝗘𝗺𝗽𝗶𝗿𝗲
+╰─────────────────────╯"""
+    mk = types.InlineKeyboardMarkup(row_width=2)
+    mk.add(types.InlineKeyboardButton("📊 ꜱᴛᴀᴛᴜꜱ", callback_data="adm_stats"),
+           types.InlineKeyboardButton("📢 ʙʀᴏᴀᴅᴄᴀꜱᴛ", callback_data="adm_cast"))
+    mk.add(types.InlineKeyboardButton("📂 ʙᴀYᴋᴜᴘ", callback_data="adm_backup"),
+           types.InlineKeyboardButton("🔄 ʀᴇꜱᴛᴀʀᴛ", callback_data="adm_rest"))
+    mk.add(types.InlineKeyboardButton("🔙 ʙᴀᴄᴋ", callback_data="back_home"))
+    bot.send_message(cid, text, reply_markup=mk)
+
+# --- CALLBACKS & LOGIC ---
+@bot.callback_query_handler(func=lambda c: c.data == "open_admin")
+def open_admin_panel(c):
+    if c.from_user.id == ADMIN_USER_ID:
+        try: bot.delete_message(c.message.chat.id, c.message.message_id)
+        except: pass
+        show_admin_panel(c.message.chat.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "chk_join")
+def verify_join(c):
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    smart_loader(c.message.chat.id, "verifying")
+    check_join_status(c.message.chat.id, c.from_user.id, c.from_user.first_name)
+
+@bot.callback_query_handler(func=lambda c: c.data == "back_home")
+def go_home(c):
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    show_user_menu(c.message.chat.id, c.from_user.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "cancel_op")
+def cancel(c):
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    bot.send_message(c.message.chat.id, "❌ **Operation Cancelled**")
+    show_user_menu(c.message.chat.id, c.from_user.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "adm_stats")
+def adm_stats(c):
+    if c.from_user.id != ADMIN_USER_ID: return
+    msg = bot.send_message(c.message.chat.id, "⏳ **Fetching Data...**")
+    report = get_system_status()
+    try: bot.edit_message_text(report, c.message.chat.id, msg.message_id)
+    except: pass
+
+@bot.callback_query_handler(func=lambda c: c.data == "adm_backup")
+def adm_backup(c):
+    if c.from_user.id != ADMIN_USER_ID: return
+    smart_loader(c.message.chat.id, "zipping data")
+    shutil.make_archive("backup", 'zip', REPO_PATH)
+    with open("backup.zip", "rb") as f:
+        bot.send_document(c.message.chat.id, f, caption=f"📦 **Backup** `{datetime.datetime.now()}`")
+    os.remove("backup.zip")
+
+@bot.callback_query_handler(func=lambda c: c.data == "adm_rest")
+def restart_bot(c):
+    if c.from_user.id != ADMIN_USER_ID: return
+    bot.answer_callback_query(c.id, "♻️ Restarting...", show_alert=True)
+    os.execv(sys.executable, ['python3'] + sys.argv)
+
+@bot.callback_query_handler(func=lambda c: c.data == "adm_cast")
+def start_broadcast(c):
+    if c.from_user.id != ADMIN_USER_ID: return
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_op"))
+    msg = bot.send_message(c.message.chat.id, "📢 **Send Broadcast Content:**", reply_markup=mk)
+    bot.register_next_step_handler(msg, get_broadcast_content)
+
+def get_broadcast_content(message):
+    if message.content_type == 'text' and message.text == '/cancel':
+        show_admin_panel(message.chat.id); return
+    broadcast_data['msg'] = message
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("⏩ Skip Button", callback_data="skip_btn"),
+           types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_op"))
+    msg = bot.send_message(message.chat.id, "🔗 **Add Button?**\nFormat: `Text - URL`", reply_markup=mk)
+    bot.register_next_step_handler(msg, get_broadcast_btn)
+
+@bot.callback_query_handler(func=lambda c: c.data == "skip_btn")
+def skip_button(c):
+    broadcast_data['btn'] = None
+    confirm_broadcast(c.message.chat.id)
+
+def get_broadcast_btn(message):
+    try:
+        txt, url = message.text.split(' - ')
+        broadcast_data['btn'] = (txt.strip(), url.strip())
+        confirm_broadcast(message.chat.id)
+    except:
+        bot.send_message(message.chat.id, "❌ **Invalid Format!**")
+        show_admin_panel(message.chat.id)
+
+def confirm_broadcast(chat_id):
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("✅ Confirm & Pin", callback_data="do_cast"),
+           types.InlineKeyboardButton("❌ Cancel", callback_data="cancel_op"))
+    bot.send_message(chat_id, "📢 **Ready to Send?**", reply_markup=mk)
+
+@bot.callback_query_handler(func=lambda c: c.data == "do_cast")
+def run_broadcast(c):
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    if not os.path.exists(ALL_USERS_FILE): return
+    with open(ALL_USERS_FILE, "r") as f: users = f.read().splitlines()
+    msg_origin = broadcast_data.get('msg')
+    btn_data = broadcast_data.get('btn')
+    markup = None
+    if btn_data:
+        markup = types.InlineKeyboardMarkup()
+        markup.add(types.InlineKeyboardButton(btn_data[0], url=btn_data[1]))
+    status_msg = bot.send_message(c.message.chat.id, f"🚀 **Sending to {len(users)} users...**")
+    done, block = 0, 0
+    for uid in users:
+        try:
+            sent = bot.copy_message(chat_id=uid, from_chat_id=msg_origin.chat.id, message_id=msg_origin.message_id, reply_markup=markup)
+            bot.pin_chat_message(uid, sent.message_id)
+            done += 1
+        except: block += 1
+        time.sleep(0.05)
+    bot.edit_message_text(f"✅ **Done!**\nSuccess: {done}\nFailed: {block}", c.message.chat.id, status_msg.message_id)
+    show_admin_panel(c.message.chat.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "srv_sensei")
+def sensei_flow(c):
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="cancel_op"))
+    msg = bot.send_message(c.message.chat.id, f"╭─{to_small_caps('sensei tunnel')}\n│ 📡 ᴇɴᴛᴇʀ ᴠᴘꜱ ɪᴘ ᴀᴅᴅʀᴇꜱꜱ:\n╰─────────────────────╯", reply_markup=mk)
+    bot.register_next_step_handler(msg, process_ip)
+
+def process_ip(m):
+    ip = m.text.strip()
+    if not re.match(r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$", ip):
+        bot.send_message(m.chat.id, "❌ **Invalid IP**")
+        show_user_menu(m.chat.id, m.from_user.id); return
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="cancel_op"))
+    msg = bot.send_message(m.chat.id, f"╭─{to_small_caps('username')}\n│ 👤 ᴇɴᴛᴇʀ ᴜꜱᴇʀɴᴀᴍᴇ:\n╰─────────────────────╯", reply_markup=mk)
+    bot.register_next_step_handler(msg, process_user, ip)
+
+def process_user(m, ip):
+    user = m.text.strip().replace(" ", "-")
+    smart_loader(m.chat.id, "creating access")
+    expiry = (datetime.datetime.now() + datetime.timedelta(days=30)).strftime("%Y-%m-%d")
+    timestamp = datetime.datetime.now().strftime("%d-%b %I:%M %p")
+    try:
+        os.chdir(REPO_PATH)
+        with open(ip, "w") as f: f.write(user)
+        with open(user, "w") as f: f.write(expiry)
+        if git_push_changes(f"Sensei: {user}"):
+            text = f"""
+╭─{to_small_caps('success')}
+│ ✅ 𝗔𝗰𝗰𝗲𝘀𝘀 𝗖𝗿𝗲𝗮𝘁𝗲𝗱!
+│ 📡 𝗜𝗣: `{ip}`
+│ 👤 𝗨𝘀𝗲𝗿: `{user}`
+│ 📅 𝗘𝘅𝗽: `{expiry}`
+╰─────────────────────╯"""
+            bot.send_message(m.chat.id, text)
+            admin_msg = f"""
+╭─{to_small_caps('new vps access')}
+│ 👤 𝗡𝗮𝗺𝗲: [{m.from_user.first_name}](tg://user?id={m.from_user.id})
+│ 🆔 𝗜𝗗: `{m.from_user.id}`
+│ 🔗 𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{m.from_user.username}
+╰─────────────────────╯
+╭─{to_small_caps('data info')}
+│ 📡 𝗜𝗣: `{ip}`
+│ 👤 𝗩𝗣𝗦 𝗨𝘀𝗲𝗿: `{user}`
+│ 📅 𝗘𝘅𝗽𝗶𝗿𝘆: `{expiry}`
+│ ⌚ 𝗧𝗶𝗺𝗲: `{timestamp}`
+╰─────────────────────╯"""
+            try: bot.send_message(ADMIN_USER_ID, admin_msg, disable_web_page_preview=True)
+            except: pass
+        else: bot.send_message(m.chat.id, "❌ **Git Error**")
+    except: bot.send_message(m.chat.id, "❌ **Server Error**")
+    show_user_menu(m.chat.id, m.from_user.id)
+
+@bot.callback_query_handler(func=lambda c: c.data == "srv_crack")
+def crack_flow(c):
+    try: bot.delete_message(c.message.chat.id, c.message.message_id)
+    except: pass
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="cancel_op"))
+    msg = bot.send_message(c.message.chat.id, f"╭─{to_small_caps('crack tool')}\n│ 🔑 ᴇɴᴛᴇʀ ʟɪᴄᴇɴꜱᴇ ᴋᴇʏ:\n╰─────────────────────╯", reply_markup=mk)
+    bot.register_next_step_handler(msg, crack_key)
+
+def crack_key(m):
+    key = m.text.strip()
+    final_key = key if key.startswith("##") else f"##{key}"
+    mk = types.InlineKeyboardMarkup()
+    mk.add(types.InlineKeyboardButton("❌ ᴄᴀɴᴄᴇʟ", callback_data="cancel_op"))
+    msg = bot.send_message(m.chat.id, f"╭─{to_small_caps('username')}\n│ 👤 ᴇɴᴛᴇʀ ʏᴏᴜʀ ɴᴀᴍᴇ:\n╰─────────────────────╯", reply_markup=mk)
+    bot.register_next_step_handler(msg, crack_name, final_key)
+
+def crack_name(m, final_key):
+    name = m.text.strip()
+    smart_loader(m.chat.id, "authorizing")
+    timestamp = datetime.datetime.now().strftime("%d-%b %I:%M %p")
+    try:
+        os.chdir(REPO_PATH)
+        with open(USERS_FILE, "a") as f: f.write(f"\n{final_key} {name}")
+        if git_push_changes(f"Crack: {name}"):
+            bot.send_message(m.chat.id, f"✅ **Approved!**\n🔑 `{final_key}`")
+            admin_msg = f"""
+╭─{to_small_caps('new crack user')}
+│ 👤 𝗡𝗮𝗺𝗲: [{m.from_user.first_name}](tg://user?id={m.from_user.id})
+│ 🆔 𝗜𝗗: `{m.from_user.id}`
+│ 🔗 𝗨𝘀𝗲𝗿𝗻𝗮𝗺𝗲: @{m.from_user.username}
+╰─────────────────────╯
+╭─{to_small_caps('license info')}
+│ 🔑 𝗞𝗲𝘆: `{final_key}`
+│ 📝 𝗡𝗮𝗺𝗲: `{name}`
+│ ⌚ 𝗧𝗶𝗺𝗲: `{timestamp}`
+╰─────────────────────╯"""
+            try: bot.send_message(ADMIN_USER_ID, admin_msg, disable_web_page_preview=True)
+            except: pass
+        else: bot.send_message(m.chat.id, "❌ **Git Error**")
+    except: pass
+    show_user_menu(m.chat.id, m.from_user.id)
+
+if __name__ == "__main__":
+    print("Bot is Online...")
+    while True:
+        try: bot.polling(non_stop=True)
+        except: time.sleep(5)
